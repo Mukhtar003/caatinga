@@ -1,5 +1,72 @@
 ## Breaking changes policy
 
+## 3.12.0
+
+### Patch Changes
+
+- 4615ed4: `ctg inspect` now shows the Stellar CLI output in the on-chain `detail` when the contract probe fails. `verifyDependencyContract` keeps the `runCommand` error as the `cause` of `DEPENDENCY_CONTRACT_NOT_FOUND`, so the raw CLI diagnostics reach callers. `ctg generate` now says `Set "buffer" to ^6` instead of `Added "buffer"`, since an out-of-range `buffer` entry is updated in place.
+- fb04f3e: Every `ctg` command now logs the resolved network and its origin up front (`Network: testnet (config)` when it came from `defaultNetwork`, `Network: mainnet (flag)` when passed via `--network`), so `--skip-deploy` runs and failed commands no longer hide which network they targeted (#244). An empty `--network ""` (for example `--network "$NET"` with `$NET` unset in CI) now fails with `CAATINGA_NETWORK_NOT_FOUND` instead of silently falling back to `defaultNetwork`. Template placeholder hints render the configured network, and the zk-starter placeholder bindings import was fixed so scaffolded projects type-check.
+- 0c9dc57: `ctg status --strict` and `ctg doctor --strict-bindings` help text now says they fail on any binding status other than `fresh` (stale, missing, or unknown), matching their behavior. Behavior is unchanged (#281).
+- 94551d4: New projects now start on the current artifacts schema (`version: 2`). The `react-vite-counter` and `zk-starter` templates shipped `"version": 1` in `caatinga.artifacts.json`, so `ctg init` / `ctg zk init` projects stayed on v1 until their first upgrade or redeploy, while `ctg init --minimal` already started on v2. Templates now ship v2, and scaffolding migrates any template that still ships v1 (for example a custom template via `CAATINGA_TEMPLATES_DIR`). Existing project files are not touched (#280).
+- 2d4a168: `ctg wire` and full-graph `ctg deploy` auto-wiring now run when only `postDeployRead` hooks are configured. Previously `ctg wire` printed "No postDeploy hooks configured" and did nothing, and deploy skipped wiring unless a `postDeploy` array existed, so the "run `ctg wire` to recover" hint was a no-op for read-only hook configs (#243).
+- Updated dependencies [21b518a]
+- Updated dependencies [670f3aa]
+- Updated dependencies [4615ed4]
+- Updated dependencies [fb04f3e]
+- Updated dependencies [94551d4]
+  - @caatinga/core@3.12.0
+  - @caatinga/zk@3.12.0
+
+## 3.11.0
+
+### Patch Changes
+
+- d2a9ed2: `ctg ci run` now re-runs the installed `ctg` binary for doctor and smoke instead of `./dist/index.js` / `pnpm dev`, so it works in user projects; a failing step stops the recipe and its exit code is propagated (#232).
+- 17c6027: `ctg estimate deploy` now simulates against the selected network and reads fees from the simulated envelope (`fee` minus `resource_fee` for inclusion), so estimates are produced and no longer double-count (#225).
+- cae6cac: Point package `homepage` to https://caatinga.xyz.
+- c8bd84b: `ctg identity export` now writes only the base64 archive to stdout; status goes to stderr, so `ctg identity export > id.b64` round-trips through `ctg identity import` (#227).
+- 88ba40f: `frontend.env` accepts a `network` source key (writes the resolved network name). The `react-vite-counter` and `zk-starter` templates now read network name, RPC and passphrase from `VITE_CAATINGA_*` (written to `.env.local` by `ctg deploy` / `ctg sync-env`) for the client, the wallet network and the artifacts lookup, defaulting to testnet when unset (#229).
+- Updated dependencies [17c6027]
+- Updated dependencies [cae6cac]
+- Updated dependencies [88ba40f]
+- Updated dependencies [e31535a]
+  - @caatinga/core@3.11.0
+  - @caatinga/zk@3.11.0
+
+## 3.10.3
+
+### Patch Changes
+
+- 292986b: Mainnet fixes from the readiness audit:
+
+  - **Mainnet commands use the configured RPC** (#224). Configs matching the well-known mainnet network were passed to the Stellar CLI as `--network mainnet`, whose built-in entry has no RPC URL ("Bring Your Own"), so `read`, `invoke`, `deploy`, `upgrade` and friends failed on mainnet or silently used a locally added network. Mainnet now always gets explicit `--rpc-url` / `--network-passphrase` from `caatinga.config.ts`. Testnet keeps the `--network testnet` shorthand.
+  - **No implicit `alice` on mainnet** (#226). `ctg read` and `ctg smoke` no longer fall back to the built-in `alice` identity on mainnet (by name or passphrase); pass `--source` or set `CAATINGA_SOURCE`, otherwise `CAATINGA_SOURCE_ACCOUNT_REQUIRED` is raised. `describeCliSource` / `resolveCliSource` accept an optional `{ network }`.
+  - **ZK dev-ceremony block detects mainnet by passphrase** (#228). `ctg zk build`, `ctg zk invoke` and verifier `ctg deploy` now block single-party dev-ceremony artifacts on a mainnet network with a custom name (e.g. `pubnet`). `isProductionNetwork` and `assertDevCeremonyAllowed` accept an optional network config.
+
+- Updated dependencies [292986b]
+  - @caatinga/core@3.10.3
+  - @caatinga/zk@3.10.3
+
+## 3.10.2
+
+### Patch Changes
+
+- d419145: `ctg doctor` now fails the Rust check for toolchains that `stellar contract build` refuses (1.81.x, 1.82.x, 1.83.x and 1.91.0) instead of reporting them as OK, and `RUST_MIN_VERSION` is raised to 1.91.1. Templates and scaffolds declare `rust-version = "1.91.1"`. Exposes `RUST_BLOCKED_VERSIONS` from `@caatinga/core/runtime/requirements`.
+- Updated dependencies [d419145]
+  - @caatinga/core@3.10.2
+  - @caatinga/zk@3.10.2
+
+## 3.10.1
+
+### Patch Changes
+
+- `ctg doctor` now fails the Rust check when the installed toolchain is older than `RUST_MIN_VERSION` (1.91.0), suggesting `rustup update stable`. The wasm target constants moved to a dependency-free module so `@caatinga/core/runtime/requirements` no longer pulls in `node:crypto` / `node:fs`.
+- Updated dependencies
+- Updated dependencies [84a5940]
+- Updated dependencies [fd55695]
+  - @caatinga/core@3.10.1
+  - @caatinga/zk@3.10.1
+
 ## 3.10.0
 
 ### Minor Changes
@@ -249,7 +316,7 @@
 
   **Positioning & docs**
 
-  - Reposition README and architecture around git-driven artifacts, multi-contract deploy, and sovereignty (ZK moved to Advanced section).
+  - Reposition README and architecture around git-driven artifacts and multi-contract deploy (ZK moved to Advanced section).
   - Add signing strategy, production readiness checklist, contract upgrade tutorial, internal counter-web case study, and outreach template.
 
   **CLI**

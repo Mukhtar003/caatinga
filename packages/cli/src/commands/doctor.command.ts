@@ -9,7 +9,15 @@ import { evaluateWasmDriftDiagnostics } from "./doctor-wasm-drift.js";
 import { reportCliVersionChannel } from "./doctor-cli-version.js";
 import { runCliAction } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
-import { loadConfig, readContractSorobanSdkVersions, WELL_KNOWN_NETWORKS } from "@caatinga/core";
+import {
+  loadConfig,
+  formatNetworkOrigin,
+  readContractSorobanSdkVersions,
+  resolveNetwork,
+  WELL_KNOWN_NETWORKS,
+  fetchNetworkProtocolVersion,
+  ZK_MIN_PROTOCOL_VERSION,
+} from "@caatinga/core";
 
 type DoctorOptions = {
   network?: string;
@@ -84,7 +92,9 @@ export async function reportBindingCoverage(
   const stale = coverage.lines.some((line) => line.status !== "fresh");
   if (stale && strictBindings) {
     logger.info("");
-    logger.info("Strict: stale or missing bindings block readiness.");
+    logger.info(
+      "Strict: bindings that are not fresh (stale, missing, or unknown) block readiness."
+    );
   }
 
   return stale && strictBindings;
@@ -180,6 +190,49 @@ async function reportAllNetworks(config: Awaited<ReturnType<typeof loadConfig>>)
   }
 }
 
+/**
+ * Advisory only: the ZK verifier needs protocol ZK_MIN_PROTOCOL_VERSION+. Never
+ * contributes to `blocked` — an unreachable RPC here must not fail a doctor run
+ * that everything else says is ready. Skipped entirely for projects without ZK
+ * circuits, so ordinary deploys pay no RPC round-trip.
+ */
+async function reportZkProtocol(config: Awaited<ReturnType<typeof loadConfig>>): Promise<void> {
+  const circuits = Object.keys(config.zk?.circuits ?? {});
+  if (circuits.length === 0) {
+    return;
+  }
+
+  logger.info("");
+  logger.info("ZK circuits:");
+  for (const circuitName of circuits) {
+    logger.info(`  ${circuitName}`);
+  }
+  logger.info(`  Protocol required for verification: >= ${ZK_MIN_PROTOCOL_VERSION}`);
+
+  for (const networkName of Object.keys(config.networks)) {
+    const networkConfig = config.networks[networkName];
+    if (!networkConfig) {
+      continue;
+    }
+
+    const { protocolVersion, reason } = await fetchNetworkProtocolVersion(networkConfig.rpcUrl);
+
+    if (protocolVersion === undefined) {
+      logger.info(`  ${networkName}: protocol unknown${reason ? ` (${reason})` : ""}`);
+      continue;
+    }
+
+    if (protocolVersion < ZK_MIN_PROTOCOL_VERSION) {
+      logger.warn(
+        `  ${networkName}: protocol ${protocolVersion} is below ${ZK_MIN_PROTOCOL_VERSION} — the verifier wasm targets protocol ${ZK_MIN_PROTOCOL_VERSION}, so a verifier deploy or \`ctg zk invoke\` will be rejected.`
+      );
+      continue;
+    }
+
+    logger.info(`  ${networkName}: protocol ${protocolVersion}`);
+  }
+}
+
 export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
@@ -188,7 +241,7 @@ export function registerDoctorCommand(program: Command): void {
     .option("-s, --source <source>", "Stellar CLI identity alias to validate")
     .option("--all-networks", "Report deploy and bindings coverage for every configured network")
     .option("--strict-env", "Fail when frontend env file drifts from artifacts")
-    .option("--strict-bindings", "Fail when bindings are stale or missing")
+    .option("--strict-bindings", "Fail when bindings are not fresh (stale, missing, or unknown)")
     .option("--strict", "Enable --strict-env and --strict-bindings")
     .action((options: DoctorOptions) =>
       runCliAction(async () => {
@@ -230,6 +283,16 @@ export function registerDoctorCommand(program: Command): void {
         if (config && options.allNetworks) {
           await reportAllNetworks(config);
         } else if (deployNetwork && ready && config) {
+          // #244: name the network the coverage reports below describe, and where
+          // it came from (--network flag vs the config default).
+          try {
+            const network = resolveNetwork(config, options.network);
+            logger.info("");
+            logger.info(`Network: ${formatNetworkOrigin(network)}`);
+          } catch {
+            // networkDiagnostic already reports an unresolvable --network.
+          }
+
           await reportDeployCoverage(deployNetwork);
           const bindingsBlocked = await reportBindingCoverage(deployNetwork, strictBindings);
           blocked = blocked || bindingsBlocked;
@@ -240,6 +303,7 @@ export function registerDoctorCommand(program: Command): void {
           await reportPostDeployAdvisories(config);
           await reportWasmDrift(deployNetwork);
           await reportVersionMatrix(config);
+          await reportZkProtocol(config);
         }
 
         logger.info("");

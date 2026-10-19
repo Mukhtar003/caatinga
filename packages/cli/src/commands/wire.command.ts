@@ -1,8 +1,14 @@
 import { Command } from "commander";
-import { loadConfig, resolveNetwork, runPostDeployHooks } from "@caatinga/core";
+import {
+  formatNetworkOrigin,
+  loadConfig,
+  resolveNetwork,
+  runPostDeployHooks,
+} from "@caatinga/core";
 import { runCliAction } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { confirmMainnetOperation } from "../utils/mainnet-guardrails.js";
+import { hasPostDeployHooks } from "../utils/post-deploy-hooks.js";
 
 export function registerWireCommand(program: Command): void {
   program
@@ -17,10 +23,13 @@ export function registerWireCommand(program: Command): void {
     .action((options: { network?: string; source: string; yes?: boolean }) =>
       runCliAction(async () => {
         const config = await loadConfig();
-        const { name: networkName, config: networkConfig } = resolveNetwork(config, options.network);
+        const network = resolveNetwork(config, options.network);
+        const { name: networkName, config: networkConfig } = network;
 
-        if (!config.postDeploy || config.postDeploy.length === 0) {
-          logger.info("No postDeploy hooks configured in caatinga.config.ts.");
+        logger.info(`Network: ${formatNetworkOrigin(network)}`);
+
+        if (!hasPostDeployHooks(config)) {
+          logger.info("No postDeploy or postDeployRead hooks configured in caatinga.config.ts.");
           return;
         }
 

@@ -4,32 +4,32 @@
 
 Caatinga is Deployment Orchestration + Versioned Artifacts for Soroban: local, graph-aware deploy orchestration and portable, Git-versioned artifacts (`caatinga.artifacts.json`) for TypeScript teams. Build/deploy/invoke shell out to Stellar CLI; `ctg generate` runs `npx @stellar/stellar-sdk generate`.
 
-Human docs: [dione-b.github.io/caatinga](https://dione-b.github.io/caatinga/). Authoritative command/API detail: [CLI](./cli.md), [Config](./config.md), [Client](./client.md), [Errors](./errors.md), [Cheatsheet](./cheatsheet.md).
+Human docs: [caatinga.xyz](https://caatinga.xyz). Authoritative command/API detail: [CLI](./cli.md), [Config](./config.md), [Client](./client.md), [Errors](./errors.md), [Cheatsheet](./cheatsheet.md).
 
 ## Install & release
 
-| Item              | Value                                                                                        |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| npm dist-tag      | `latest` → **3.9.2** (`@caatinga/cli`, `@caatinga/core`, `@caatinga/client`, `@caatinga/zk`) |
-| Status            | **v1.0 stable contract** on npm major `3.x`. Pin an exact version for reproducible installs. |
-| Global install    | `npm install -g @caatinga/cli` (binaries: `caatinga`, `ctg`)                                 |
-| No global install | `npx ctg <command>` (`caatinga` is a legacy alias)                                           |
-| Reproducible CI   | Pin an exact version (e.g. `@caatinga/cli@3.9.2`), not a floating tag                        |
-| Fresh machine     | Node 22+, then check with `npx ctg doctor`. Install Rust, Stellar CLI manually.              |
-| Stellar CLI       | Hard floor **23.0.0**; last tested **28.0.0**; newer = advisory warning only                 |
+| Item              | Value                                                                                          |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| npm dist-tag      | Check with `npm view @caatinga/cli dist-tags` (`cli`, `core`, `client`, `zk` release together) |
+| Status            | **v1.0 stable contract** on npm major `3.x`. Pin an exact version for reproducible installs.   |
+| Global install    | `npm install -g @caatinga/cli` (binary `ctg`; `caatinga` is a legacy alias)                    |
+| No global install | `npx ctg <command>` (`caatinga` is a legacy alias)                                             |
+| Reproducible CI   | Pin an exact version (e.g. `@caatinga/cli@3.12.0`), not a floating tag                         |
+| Fresh machine     | Node 22+, then check with `npx ctg doctor`. Install Rust, Stellar CLI manually.                |
+| Stellar CLI       | Hard floor **23.0.0**; last tested **28.0.0**; newer = advisory warning only                   |
 
 See [Public API](./public-api.md) and [Stellar CLI version contract](./stellar-cli-version-contract.md).
 
 ## Capability limits
 
-| Capability                     | Status                                                       |
-| ------------------------------ | ------------------------------------------------------------ |
-| Official frontend templates    | Vite + React only (`vite-react`)                             |
-| `ctg zk build`                 | Single-party **dev** ceremony; blocked on mainnet by default |
-| `ctg zk invoke --embed-vk`     | Not supported (experimental)                                 |
-| Browser `invoke` via wallet    | **Single-invoker only**                                      |
-| Multi-signer / `signAuthEntry` | Application code → `CAATINGA_MULTI_AUTH_REQUIRED`            |
-| Production ZK (MPC ceremony)   | Out of scope                                                 |
+| Capability                     | Status                                                                                                   |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Official frontend templates    | Vite + React only (`vite-react`)                                                                         |
+| `ctg zk build`                 | **Dev** ceremony by default; `ctg zk import-ceremony` imports an audited one and lifts the mainnet block |
+| `ctg zk invoke --embed-vk`     | Supported — calls `verify_proof_embedded` (needs `zk build --embed-vk`)                                  |
+| Browser `invoke` via wallet    | **Single-invoker only**                                                                                  |
+| Multi-signer / `signAuthEntry` | Application code → `CAATINGA_MULTI_AUTH_REQUIRED`                                                        |
+| Production ZK (MPC ceremony)   | `ctg zk import-ceremony` imports an external ceremony; running it is out of scope                        |
 
 ---
 
@@ -92,7 +92,7 @@ Full flags and tables: [CLI](./cli.md) · [Cheatsheet](./cheatsheet.md).
 - `status --strict` fails when deployed contracts have bindings other than `fresh`.
 - Expect DSL (smoke / `read --expect` / postDeploy): `reachable`, `equals`, `contains`, `matches`, `jsonEquals`, `isArray`, `isNull`, `minLength`, `maxLength` — see [CLI](./cli.md).
 
-Core commands: `init`, `zk init`, `build`, `deploy`, `upgrade`, `generate`, `doctor`, `status`, `invoke`, `read`, `smoke`, `regression`, `ci run`, `wire`, `sync-env`, `estimate deploy`, `inspect`, `migrate artifacts`, `rollback`, `zk build|prove|invoke`. Binary alias: `ctg` ≡ `caatinga`.
+Core commands: `init`, `zk init`, `build`, `deploy`, `upgrade`, `generate`, `doctor`, `status`, `invoke`, `read`, `smoke`, `regression`, `ci run`, `wire`, `sync-env`, `estimate deploy`, `estimate verify`, `inspect`, `migrate artifacts`, `rollback`, `zk init|build|import-ceremony|verify-ceremony|prove|invoke`. Binary alias: `ctg` ≡ `caatinga`.
 
 ---
 
@@ -138,8 +138,9 @@ Full API: [Client](./client.md) · [Wallets](./wallets.md).
 ```ts
 import { createCaatingaClient } from "@caatinga/client";
 import { createStellarWalletsKitAdapter } from "@caatinga/client/stellar-wallets-kit";
+import type { CaatingaArtifacts } from "@caatinga/core/browser";
 import * as Counter from "./contracts/generated/counter";
-import artifacts from "../caatinga.artifacts.json";
+import artifactsJson from "../caatinga.artifacts.json";
 
 const client = createCaatingaClient({
   network: {
@@ -147,7 +148,8 @@ const client = createCaatingaClient({
     rpcUrl: "https://soroban-testnet.stellar.org",
     networkPassphrase: "Test SDF Network ; September 2015",
   },
-  artifacts,
+  // JSON imports widen `version` to number; the cast restores the artifacts schema type.
+  artifacts: artifactsJson as CaatingaArtifacts,
   wallet: createStellarWalletsKitAdapter(),
   contracts: { counter: { binding: Counter } },
 });
