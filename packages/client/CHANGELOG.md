@@ -1,5 +1,70 @@
 ## Breaking changes policy
 
+## 3.12.0
+
+### Minor Changes
+
+- 488a107: `read()` and `simulate()` work without a connected wallet. `CaatingaClientConfig.wallet` is now optional, and `CaatingaBindingAdapter.createClient` takes an optional `publicKey`.
+
+  The read source is chosen in order: the per-call `sourceAccount` option, then the wallet public key, then `readSourceAccount`, then `DEFAULT_READ_SOURCE_ACCOUNT` (the Stellar null account). That placeholder is not sent to RPC — the client omits `publicKey` so the Stellar SDK builds from its local null account instead of `getAccount`. A wallet or configured source is still loaded with `getAccount`.
+
+  Invalid `readSourceAccount` or `options.sourceAccount` values throw `CAATINGA_INVALID_CONFIG`. A single object is treated as call options only when every key is a known option (`debugRaw` / `sourceAccount` for reads, `debugXdr` / `debugRaw` for invokes); mixed objects are forwarded as contract arguments. `{ sourceAccount }` alone is options, so a method argument with that name needs the two-argument form. `CAATINGA_WALLET_TIMEOUT` and other Caatinga errors from `getPublicKey` surface on reads; `CAATINGA_WALLET_NOT_CONNECTED` and plain adapter rejections fall back to the next source.
+
+### Patch Changes
+
+- d1fc2bb: `walletStubPnpmWorkspaceYaml()` now starts with `packages: []`, so a standalone app that writes its output to `pnpm-workspace.yaml` no longer fails `pnpm install` on pnpm 9 ("packages field missing or empty"). The helper output now matches the official templates' `pnpm-workspace.yaml` (#279).
+- Updated dependencies [21b518a]
+- Updated dependencies [670f3aa]
+- Updated dependencies [4615ed4]
+- Updated dependencies [fb04f3e]
+- Updated dependencies [94551d4]
+  - @caatinga/core@3.12.0
+
+## 3.11.0
+
+### Minor Changes
+
+- e31535a: New `CAATINGA_WALLET_NETWORK_MISMATCH`: wallet adapters may implement optional `getNetworkPassphrase()`, and `invoke()` fails fast before building/signing when the wallet is on another network than the app. The Freighter and Stellar Wallets Kit adapters implement it; wallets that cannot report their network are not blocked (#230).
+
+### Patch Changes
+
+- fae498d: Freighter adapter now handles freighter-api v4 `{ error }` responses: a missing address throws `CAATINGA_WALLET_NOT_CONNECTED` and a failed or rejected signature throws `CAATINGA_XDR_SIGN_FAILED`, both carrying Freighter's message (#231).
+- cae6cac: Point package `homepage` to https://caatinga.xyz.
+- Updated dependencies [17c6027]
+- Updated dependencies [cae6cac]
+- Updated dependencies [88ba40f]
+- Updated dependencies [e31535a]
+  - @caatinga/core@3.11.0
+
+## 3.10.3
+
+### Patch Changes
+
+- Updated dependencies [292986b]
+  - @caatinga/core@3.10.3
+
+## 3.10.2
+
+### Patch Changes
+
+- Updated dependencies [d419145]
+  - @caatinga/core@3.10.2
+
+## 3.10.1
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies [84a5940]
+- Updated dependencies [fd55695]
+  - @caatinga/core@3.10.1
+
+## 3.10.0
+
+### Patch Changes
+
+- @caatinga/core@3.10.0
+
 ## 3.9.2
 
 ### Patch Changes
@@ -110,7 +175,7 @@
 
   **Positioning & docs**
 
-  - Reposition README and architecture around git-driven artifacts, multi-contract deploy, and sovereignty (ZK moved to Advanced section).
+  - Reposition README and architecture around git-driven artifacts and multi-contract deploy (ZK moved to Advanced section).
   - Add signing strategy, production readiness checklist, contract upgrade tutorial, internal counter-web case study, and outreach template.
 
   **CLI**

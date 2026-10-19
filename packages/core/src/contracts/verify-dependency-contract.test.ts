@@ -56,7 +56,7 @@ describe("verifyDependencyContract", () => {
     runCommand.mockResolvedValue({ stdout: "", stderr: "", all: "" });
   });
 
-  it("should_call_stellar_contract_info_interface_with_contract_id", async () => {
+  it("should_probe_the_deployed_contract_with_stellar_fetch", async () => {
     await verifyDependencyContract({
       dependencyName: "token",
       contractId: tokenId,
@@ -66,7 +66,16 @@ describe("verifyDependencyContract", () => {
 
     expect(runCommand).toHaveBeenCalledWith(
       "stellar",
-      ["contract", "info", "interface", "--contract-id", tokenId, "--network", "testnet"],
+      [
+        "contract",
+        "fetch",
+        "--id",
+        tokenId,
+        "--out-file",
+        expect.stringMatching(/caatinga-contract-fetch-.+\/contract\.wasm$/),
+        "--network",
+        "testnet",
+      ],
       expect.objectContaining({
         cwd: "/tmp/app",
         failureCode: CaatingaErrorCode.DEPENDENCY_CONTRACT_NOT_FOUND,
@@ -74,14 +83,13 @@ describe("verifyDependencyContract", () => {
     );
   });
 
-  it("should_throw_DEPENDENCY_CONTRACT_NOT_FOUND_when_stellar_contract_info_fails", async () => {
-    runCommand.mockRejectedValue(
-      new CaatingaError(
-        "Command failed: stellar contract info interface",
-        CaatingaErrorCode.DEPENDENCY_CONTRACT_NOT_FOUND,
-        "contract not found on ledger"
-      )
+  it("should_throw_DEPENDENCY_CONTRACT_NOT_FOUND_when_stellar_contract_fetch_fails", async () => {
+    const commandError = new CaatingaError(
+      "Command failed: stellar contract fetch",
+      CaatingaErrorCode.DEPENDENCY_CONTRACT_NOT_FOUND,
+      "contract not found on ledger"
     );
+    runCommand.mockRejectedValue(commandError);
 
     await expect(
       verifyDependencyContract({
@@ -92,6 +100,8 @@ describe("verifyDependencyContract", () => {
     ).rejects.toMatchObject({
       code: CaatingaErrorCode.DEPENDENCY_CONTRACT_NOT_FOUND,
       message: expect.stringContaining("token"),
+      hint: expect.stringMatching(/Deploy the dependency[\s\S]*contract not found on ledger/),
+      cause: commandError,
     });
   });
 });

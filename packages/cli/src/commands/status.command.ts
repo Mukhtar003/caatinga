@@ -1,10 +1,13 @@
 import { Command } from "commander";
 import {
   collectProjectStatus,
+  formatNetworkOrigin,
   frontendBindingsConfigHint,
   loadConfig,
+  resolveNetwork,
   type ContractStatusEntry,
 } from "@caatinga/core";
+import { collectZkStatus, type ZkCircuitStatus } from "@caatinga/zk";
 import { npxCli } from "../utils/cli-name.js";
 import { runCliAction } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
@@ -31,29 +34,74 @@ function toRow(entry: ContractStatusEntry): string[] {
   ];
 }
 
+const ZK_DRIFT_LABEL: Record<ZkCircuitStatus["status"], string> = {
+  "not-built": "not built",
+  "up-to-date": "up to date",
+  "circuit-changed": "circuit changed",
+  "input-changed": "inputs changed",
+  "vk-changed": "verification key changed",
+  "artifacts-missing": "artifacts missing",
+};
+
+function reportZkDrift(statuses: ZkCircuitStatus[]): void {
+  logger.info("");
+  logger.info("ZK circuits:");
+  for (const entry of statuses) {
+    logger.info(`  ${entry.name}: ${ZK_DRIFT_LABEL[entry.status]}`);
+    if (entry.ceremonyType) {
+      logger.info(
+        `    ceremony: ${entry.ceremonyType === "mpc-multi-party" ? "MPC (audited)" : "dev single-party"}`
+      );
+    }
+    for (const advisory of entry.advisories) {
+      logger.info(`    ${advisory}`);
+    }
+  }
+}
+
 export function registerStatusCommand(program: Command): void {
   program
     .command("status")
     .description("Show deployed contracts and binding freshness per network")
     .option("-n, --network <network>", "Configured network name")
     .option("--json", "Print machine-readable JSON instead of the table")
-    .option("--strict", "Exit with code 1 when any deployed contract has stale or missing bindings")
+    .option(
+      "--strict",
+      "Exit with code 1 when any deployed contract has bindings that are not fresh (stale, missing, or unknown)"
+    )
     .action((options: { network?: string; json?: boolean; strict?: boolean }) =>
       runCliAction(async () => {
         const config = await loadConfig();
+        const requestedNetwork = options.network
+          ? resolveNetwork(config, options.network)
+          : undefined;
+        // Without --network, status reports every network recorded in the
+        // artifacts, so there is no single origin to report (#244). Only
+        // label the origin when the request came from the --network flag.
         const status = await collectProjectStatus({
           config,
           networkName: options.network,
         });
 
+        const zkStatuses = await collectZkStatus({ config });
+
         if (options.json) {
-          console.log(JSON.stringify(status, null, 2));
+          // Additive: contracts and networks keep their existing shape, so
+          // existing `--json` consumers and CI scripts are unaffected.
+          console.log(JSON.stringify({ ...status, zk: zkStatuses }, null, 2));
         } else {
           logger.success(`Project: ${status.project}`);
 
           for (const network of status.networks) {
             logger.info("");
-            logger.info(`Network: ${network.network}`);
+            // Origin is only known when the network came from the --network flag;
+            // without it status reports every network recorded in the artifacts.
+            logger.info(
+              `Network: ${formatNetworkOrigin({
+                name: network.network,
+                origin: requestedNetwork?.origin,
+              })}`
+            );
 
             const lines = renderTable(
               ["CONTRACT", "CONTRACT ID", "WASM HASH", "DEPLOYED", "BINDINGS", "DEPS"],
@@ -85,6 +133,13 @@ export function registerStatusCommand(program: Command): void {
                 `${summary} — run: ${npxCli(`generate ${entry.name} --network ${network.network}`)}`
               );
             }
+          }
+
+          // ZK drift is reported but never fed into `--strict`: the strict flag
+          // guards binding freshness, and widening its meaning would silently
+          // change CI outcomes for existing pipelines.
+          if (zkStatuses.length > 0) {
+            reportZkDrift(zkStatuses);
           }
         }
 

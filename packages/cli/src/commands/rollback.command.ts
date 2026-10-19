@@ -4,10 +4,12 @@ import {
   CaatingaErrorCode,
   loadConfig,
   resolveNetwork,
+  formatNetworkOrigin,
   rollbackContractArtifact,
 } from "@caatinga/core";
 import { runCliAction } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { confirmMainnetOperation } from "../utils/mainnet-guardrails.js";
 
 /** Stellar contract IDs are base-32 encoded 56-char strings starting with C, or hex 64-char strings. */
 const VALID_CONTRACT_ID = /^(C[A-Z2-7]{55}|[0-9a-fA-F]{64})$/;
@@ -19,7 +21,8 @@ export function registerRollbackCommand(program: Command): void {
     .argument("<contract>", "Contract name")
     .requiredOption("--to <contractId>", "Historical contract ID to restore")
     .option("-n, --network <network>", "Configured network name")
-    .action((contractName: string, options: { to: string; network?: string }) =>
+    .option("-y, --yes", "Automatically confirm mainnet transactions without interactive prompt")
+    .action((contractName: string, options: { to: string; network?: string; yes?: boolean }) =>
       runCliAction(async () => {
         if (!VALID_CONTRACT_ID.test(options.to)) {
           throw new CaatingaError(
@@ -30,7 +33,19 @@ export function registerRollbackCommand(program: Command): void {
         }
 
         const config = await loadConfig();
-        const { name: networkName } = resolveNetwork(config, options.network);
+        const network = resolveNetwork(config, options.network);
+        const { name: networkName, config: networkConfig } = network;
+
+        logger.info(`Network: ${formatNetworkOrigin(network)}`);
+
+        await confirmMainnetOperation({
+          operation: "rollback",
+          networkName,
+          networkConfig,
+          contractName,
+          contractId: options.to,
+          yes: options.yes,
+        });
 
         const result = await rollbackContractArtifact({
           networkName,
@@ -39,7 +54,6 @@ export function registerRollbackCommand(program: Command): void {
         });
 
         logger.success("Artifact rollback complete");
-        logger.info(`Network: ${networkName}`);
         logger.info(`Contract: ${contractName}`);
         logger.info(`Active contract ID: ${options.to}`);
         logger.info(`Updated: ${result.path}`);

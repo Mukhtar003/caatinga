@@ -8,7 +8,7 @@ Deployment Orchestration + Versioned Artifacts for Soroban.
 - Deploy multiple Soroban contracts.
 - Track deployments in Git.
 - Generate browser-ready TypeScript bindings.
-- No hosted registry required.
+- Deployment state lives in your repo.
 
 ```bash
 npm install -g @caatinga/cli
@@ -27,7 +27,12 @@ ctg build counter
 ctg deploy counter --network testnet --source alice
 ```
 
-`deploy` writes the contract ID to `caatinga.artifacts.json` and generates TypeScript bindings (pass `--no-generate` to skip). Run `ctg doctor` to verify prerequisites.
+`deploy` writes the contract ID to `caatinga.artifacts.json` and generates TypeScript bindings (pass `--no-generate` to skip).
+
+**Templates** ([docs](./docs/templates.md)):
+
+- `ctg init` scaffolds `react-vite-counter` (React + Vite + wallet) by default; pass `--minimal` for a contract-only project.
+- `ctg zk init my-zk-dapp` scaffolds `zk-starter` (Circom Groth16 circuit + Soroban verifier). See [ZK](./docs/zk.md).
 
 **Docs:** start at [Getting started](./docs/getting-started.md). Optional walkthrough: [From Zero to Testnet](./docs/tutorials/from-zero-to-testnet.md).
 
@@ -67,7 +72,7 @@ await caatingaClient.contract("counter").invoke("increment");
 
 Caatinga orchestrates the official Stellar stack — build, deploy, and invoke still shell out to Stellar CLI;
 `ctg generate` runs `npx @stellar/stellar-sdk generate`. Deployed contract IDs live in
-`caatinga.artifacts.json`, committed to git, keyed per network. No mandatory hosted registry.
+`caatinga.artifacts.json`, committed to git, keyed per network.
 See [ADR 0002](./docs/adr/0002-local-artifacts-as-source-of-truth.md).
 
 ```
@@ -76,8 +81,8 @@ See [ADR 0002](./docs/adr/0002-local-artifacts-as-source-of-truth.md).
           │                                        ▲          │
           ▼                                        │          ▼
   ┌────────────────┐    ┌──────────────────┐  ┌─────────────────────────┐
-  │ ctg build │ →  │ ctg deploy  │→ │ bindings auto-generated │
-  │  (Stellar CLI) │    │ (graph-aware)    │  │ + freshness markers     │
+  │   ctg build    │ →  │    ctg deploy    │→ │ bindings auto-generated │
+  │  (Stellar CLI) │    │  (graph-aware)   │  │ + freshness markers     │
   └────────────────┘    └──────────────────┘  └─────────────────────────┘
                                                           │
                               browser                     ▼
@@ -89,15 +94,15 @@ See [ADR 0002](./docs/adr/0002-local-artifacts-as-source-of-truth.md).
 ## Requirements
 
 - **Node.js** 22+
-- **[Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)** 23.0.0+ on `PATH` (27.0.0 recommended)
-- **Rust** 1.84.0+ with the `wasm32v1-none` target
+- **[Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/stellar-cli)** 23.0.0+ on `PATH` (28.0.0 recommended)
+- **Rust** 1.91.1+ with the `wasm32v1-none` target
 - A funded local Stellar CLI identity (e.g. `alice`)
 
 Run `ctg doctor` to check what is missing. Install prerequisites manually — see [Getting started](./docs/getting-started.md#prerequisites). See the [version contract](./docs/stellar-cli-version-contract.md).
 
 ## Documentation
 
-- **Docs site:** [dione-b.github.io/caatinga](https://dione-b.github.io/caatinga/)
+- **Docs site:** [caatinga.xyz](https://caatinga.xyz)
 - [Getting started](./docs/getting-started.md) — install, scaffold, CLI-to-browser flow
 - [Cheatsheet](./docs/cheatsheet.md) · [CLI reference](./docs/cli.md) · [Troubleshooting](./docs/troubleshooting.md)
 - [Client](./docs/client.md) · [Wallets](./docs/wallets.md) · [Errors](./docs/errors.md)
@@ -117,13 +122,26 @@ my-dapp/
 
 ## Packages
 
-| Package            | Role                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------- |
-| `@caatinga/cli`    | `caatinga` / `ctg` command — init, build, deploy, upgrade, dev, doctor, generate, invoke, read, status, migrate, rollback, estimate, inspect, wire, sync-env, smoke, regression, ci, identity, zk, version |
-| `@caatinga/core`   | Config, shell orchestration, Stellar CLI adapters, error catalog                                        |
-| `@caatinga/client` | Browser/Node contract client, wallet adapters, React hooks                                              |
+| Package            | Role                                                                                                                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@caatinga/cli`    | `caatinga` / `ctg` command — init, build, deploy, upgrade, doctor, generate, invoke, read, status, migrate, rollback, estimate, inspect, wire, sync-env, smoke, regression, ci, identity, zk, version |
+| `@caatinga/core`   | Config, shell orchestration, Stellar CLI adapters, error catalog                                                                                                                                      |
+| `@caatinga/client` | Browser/Node contract client, wallet adapters, React hooks                                                                                                                                            |
+| `@caatinga/zk`     | ZK proof serialization and Circom Groth16 workflow helpers                                                                                                                                            |
 
 Full export map: [Packages](./docs/packages.md). Public errors use stable `CAATINGA_*` codes — see [Errors](./docs/errors.md).
+
+## Community & education
+
+Caatinga is used in hands-on Stellar developer education and building settings:
+
+- **Stellar Summit São Paulo**: Caatinga presented to builders
+- **Stellar 37 Degrees** (Rio de Janeiro): developer and community engagement
+- **Stellar Pulso Hackathon**: deployment tooling for hackathon teams
+- **Give Impacta Colombia** (Medellín): mentoring blockchain developers
+- **NearX Labs postgraduate program**: part of the curriculum; students building on Soroban use it as their deployment tooling
+
+Running a workshop, hackathon, or course with Caatinga? Open a PR adding it here.
 
 ## Contributing
 
@@ -134,6 +152,12 @@ git clone https://github.com/Dione-b/caatinga.git && cd caatinga
 pnpm install && pnpm build && pnpm test
 pnpm dev init my-dapp   # run CLI from source
 ```
+
+## Contributors
+
+<a href="https://github.com/Dione-b/caatinga/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Dione-b/caatinga" alt="Caatinga contributors" />
+</a>
 
 ## License
 

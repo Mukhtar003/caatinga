@@ -36,11 +36,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.local/bin/stellar
-          key: stellar-cli-27.0.0-${{ runner.os }}-${{ runner.arch }}
+          key: stellar-cli-28.0.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install Stellar CLI
         if: steps.stellar-cli-cache.outputs.cache-hit != 'true'
-        uses: stellar/stellar-cli@v27.0.0
+        run: bash scripts/install-stellar-cli.sh 28.0.0
 
       # The install action puts ~/.local/bin on PATH itself; on a cache hit it is
       # skipped, so add the directory here too.
@@ -53,7 +53,7 @@ jobs:
         run: |
           version="$(stellar --version)"
           echo "$version"
-          [[ "$version" == *"27.0.0"* ]]
+          [[ "$version" == *"28.0.0"* ]]
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -70,11 +70,63 @@ jobs:
       - name: Docs check
         run: pnpm docs:check
 
+      - name: Template imports
+        run: pnpm check:template-imports
+
       - name: Build
         run: pnpm build
 
       - name: Test
         run: pnpm test
+
+  # ZK checks that need real toolchains: the verifier scaffold under `cargo test`
+  # (#299) and snarkjs-backed ceremony verification (#300).
+  zk-verifier-cargo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/zk-verifier-target
+          key: zk-verifier-cargo-${{ runner.os }}-${{ hashFiles('packages/core/scaffolds/zk-verifier/Cargo.lock') }}
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Embedded VK equivalence
+        env:
+          CAATINGA_CARGO_TESTS: "1"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/zk-verifier-target
+        run: pnpm --filter @caatinga/zk exec vitest run src/build/embedded-vk-equivalence.test.ts
+
+      # Real snarkjs: a power-8 BLS12-381 ceremony, imported and checked by
+      # `ctg zk verify-ceremony`'s logic, including tampered-key cases (#300).
+      - name: Ceremony verification
+        env:
+          CAATINGA_ZK_TOOLS_TESTS: "1"
+        run: pnpm --filter @caatinga/zk exec vitest run src/ceremony/verify-ceremony.test.ts
 
   stellar-cli-matrix:
     runs-on: ubuntu-latest
@@ -106,9 +158,7 @@ jobs:
 
       - name: Install Stellar CLI ${{ matrix.stellar-version }}
         if: steps.stellar-cli-cache.outputs.cache-hit != 'true'
-        uses: stellar/stellar-cli@v27.0.0
-        with:
-          version: ${{ matrix.stellar-version }}
+        run: bash scripts/install-stellar-cli.sh ${{ matrix.stellar-version }}
 
       - name: Add Stellar CLI to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"

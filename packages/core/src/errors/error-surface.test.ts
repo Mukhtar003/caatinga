@@ -42,6 +42,10 @@ const productionTriggerTests: Record<CaatingaErrorCodeValue, { file: string; tri
     file: "packages/core/src/shell/run-command.test.ts",
     trigger: "runCommand(",
   },
+  [CaatingaErrorCode.COMMAND_TIMEOUT]: {
+    file: "packages/core/src/shell/run-command.test.ts",
+    trigger: "runCommand(",
+  },
   [CaatingaErrorCode.UNEXPECTED_ERROR]: {
     file: "packages/core/src/errors/to-caatinga-error.test.ts",
     trigger: "toCaatingaError(",
@@ -202,6 +206,10 @@ const productionTriggerTests: Record<CaatingaErrorCodeValue, { file: string; tri
     file: "packages/client/src/client/caatinga-contract-client.test.ts",
     trigger: 'client.contract("counter").buildXdr(',
   },
+  [CaatingaErrorCode.WALLET_NETWORK_MISMATCH]: {
+    file: "packages/client/src/client/caatinga-contract-client.test.ts",
+    trigger: 'createCaatingaClient(config).contract("counter").invoke(',
+  },
   [CaatingaErrorCode.WALLET_TIMEOUT]: {
     file: "packages/client/src/client/create-caatinga-client.test.ts",
     trigger: 'client.contract("counter").invoke(',
@@ -254,6 +262,42 @@ const productionTriggerTests: Record<CaatingaErrorCodeValue, { file: string; tri
     file: "packages/core/src/errors/to-caatinga-error.test.ts",
     trigger: "toCaatingaError(",
   },
+  [CaatingaErrorCode.ZK_VK_REQUIRED]: {
+    file: "packages/core/src/errors/to-caatinga-error.test.ts",
+    trigger: "toCaatingaError(",
+  },
+  [CaatingaErrorCode.ZK_INVOKE_FAILED]: {
+    file: "packages/core/src/errors/to-caatinga-error.test.ts",
+    trigger: "toCaatingaError(",
+  },
+  [CaatingaErrorCode.ZK_DOWNLOAD_FAILED]: {
+    file: "packages/core/src/errors/to-caatinga-error.test.ts",
+    trigger: "toCaatingaError(",
+  },
+  [CaatingaErrorCode.ZK_UNSUPPORTED_PLATFORM]: {
+    file: "packages/core/src/errors/to-caatinga-error.test.ts",
+    trigger: "toCaatingaError(",
+  },
+  [CaatingaErrorCode.ZK_PROTOCOL_VERSION_UNSUPPORTED]: {
+    file: "packages/core/src/networks/protocol-version.test.ts",
+    trigger: "assertProtocolForZk(",
+  },
+  [CaatingaErrorCode.ZK_INPUT_CONTAINS_PUBLIC_SIGNALS]: {
+    file: "packages/core/src/errors/to-caatinga-error.test.ts",
+    trigger: "toCaatingaError(",
+  },
+  [CaatingaErrorCode.ZK_EMBED_VK_UNSUPPORTED]: {
+    file: "packages/cli/src/utils/zk-guardrails.test.ts",
+    trigger: "assertEmbedVkInvokeSupported(",
+  },
+  [CaatingaErrorCode.ZK_CEREMONY_INCOMPATIBLE]: {
+    file: "packages/core/src/errors/to-caatinga-error.test.ts",
+    trigger: "toCaatingaError(",
+  },
+  [CaatingaErrorCode.ZK_CEREMONY_TAMPERED]: {
+    file: "packages/zk/src/ceremony/ceremony-integrity.test.ts",
+    trigger: "assertCeremonyIntegrity(",
+  },
   [CaatingaErrorCode.DOCTOR_PARTIAL_DEPLOY]: {
     file: "packages/core/src/errors/error-codes.test.ts",
     trigger: "CaatingaErrorCode.DOCTOR_PARTIAL_DEPLOY",
@@ -273,6 +317,10 @@ const productionTriggerTests: Record<CaatingaErrorCodeValue, { file: string; tri
   [CaatingaErrorCode.NETWORK_ARTIFACTS_MISSING]: {
     file: "packages/cli/src/commands/generate.command.test.ts",
     trigger: "--strict-network",
+  },
+  [CaatingaErrorCode.MAINNET_CONFIRMATION_REQUIRED]: {
+    file: "packages/cli/src/utils/mainnet-guardrails.test.ts",
+    trigger: "confirmMainnetOperation(",
   },
 };
 
