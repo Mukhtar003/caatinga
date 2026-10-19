@@ -1,8 +1,12 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { CaatingaArtifacts } from "../artifacts/artifact.schema.js";
 import { CaatingaError, CaatingaErrorCode } from "../errors/CaatingaError.js";
 import type { ResolvedNetwork } from "../networks/resolve-network.js";
 import { runCommand } from "../shell/run-command.js";
 import { buildStellarNetworkArgs } from "../stellar-cli/build-stellar-network-args.js";
+import { TRANSACTION_TIMEOUT_MS } from "../shell/command-timeouts.js";
 
 export async function verifyDependencyContract(options: {
   dependencyName: string;
@@ -10,20 +14,27 @@ export async function verifyDependencyContract(options: {
   network: ResolvedNetwork;
   cwd?: string;
 }): Promise<void> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "caatinga-contract-fetch-"));
+  const outFile = path.join(tempDir, "contract.wasm");
   try {
+    // `fetch --out-file` keeps the WASM bytes off stdout (#133). It fails for
+    // built-in Stellar Asset Contracts, which have no WASM; those cannot be
+    // artifact dependencies today, so every probed contract is a deployed WASM.
     await runCommand(
       "stellar",
       [
         "contract",
-        "info",
-        "interface",
-        "--contract-id",
+        "fetch",
+        "--id",
         options.contractId,
+        "--out-file",
+        outFile,
         ...buildStellarNetworkArgs(options.network),
       ],
       {
         cwd: options.cwd,
         failureCode: CaatingaErrorCode.DEPENDENCY_CONTRACT_NOT_FOUND,
+        timeout: TRANSACTION_TIMEOUT_MS,
       }
     );
   } catch (error) {
@@ -34,12 +45,21 @@ export async function verifyDependencyContract(options: {
       throw new CaatingaError(
         `Dependency "${options.dependencyName}" is not deployed on "${options.network.name}" (contract ID ${options.contractId}).`,
         CaatingaErrorCode.DEPENDENCY_CONTRACT_NOT_FOUND,
-        "Deploy the dependency on this network, fix caatinga.artifacts.json, or omit --verify-deps.",
-        error.cause
+        [
+          "Deploy the dependency on this network, fix caatinga.artifacts.json, or omit --verify-deps.",
+          error.hint ? `Stellar CLI diagnostics:\n${error.hint}` : undefined,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        // Keep the runCommand error so callers such as `inspect` can surface the
+        // raw CLI output from its hint without the deploy-only guidance above.
+        error
       );
     }
 
     throw error;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
   }
 }
 

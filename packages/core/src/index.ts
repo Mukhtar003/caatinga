@@ -53,9 +53,30 @@ export {
 } from "./bindings/binding-freshness.js";
 
 export { WELL_KNOWN_NETWORKS } from "./networks/networks.js";
-export { resolveNetwork, type ResolvedNetwork } from "./networks/resolve-network.js";
+export {
+  resolveNetwork,
+  formatNetworkOrigin,
+  type ResolvedNetwork,
+  type NetworkOrigin,
+} from "./networks/resolve-network.js";
+export { isMainnetNetwork, requiresMainnetConfirmation } from "./networks/mainnet-guardrails.js";
+export {
+  assertProtocolForZk,
+  fetchNetworkProtocolVersion,
+  ZK_MIN_PROTOCOL_VERSION,
+  PROTOCOL_VERSION_TIMEOUT_MS,
+  PROTOCOL_VERSION_MAX_ATTEMPTS,
+  type AssertProtocolForZkOptions,
+  type FetchProtocolVersionResult,
+} from "./networks/protocol-version.js";
 
 export { runCommand, type RunCommandResult } from "./shell/run-command.js";
+export {
+  VERSION_PROBE_TIMEOUT_MS,
+  REGISTRY_TIMEOUT_MS,
+  BINDINGS_TIMEOUT_MS,
+  TRANSACTION_TIMEOUT_MS,
+} from "./shell/command-timeouts.js";
 export { resolveSubprocessEnv, isCargoBinMissingFromPath } from "./shell/resolve-subprocess-env.js";
 export { checkBinary } from "./shell/check-binary.js";
 export { parseContractId } from "./stellar-cli/parse-contract-id.js";
@@ -212,6 +233,16 @@ export {
   type DeployCostEstimate,
   type EstimateDeployCostOptions,
 } from "./contracts/estimate-deploy-cost.js";
+export {
+  estimateZkVerifyCost,
+  formatZkVerifyCostEstimate,
+  ZK_BASE_CPU_INSTRUCTIONS,
+  ZK_CPU_INSTRUCTIONS_PER_PUBLIC_INPUT,
+  ZK_BASE_MEMORY_BYTES,
+  ZK_WARN_UTILIZATION,
+  SOROBAN_NETWORK_LIMITS,
+  type ZkVerifyCostEstimate,
+} from "./zk/estimate-verify-cost.js";
 export {
   inspectContract,
   type ContractInspectResult,

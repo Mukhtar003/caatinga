@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CaatingaErrorCode } from "../errors/CaatingaError.js";
 import { parseStellarCliVersion } from "./version.js";
+import { STELLAR_CLI_LAST_TESTED_VERSION as CANONICAL_LAST_TESTED_VERSION } from "./version.js";
 import {
   STELLAR_CLI_LAST_TESTED_VERSION,
   STELLAR_CLI_MIN_VERSION,
@@ -10,17 +11,21 @@ import {
 describe("evaluateStellarCliCompatibility", () => {
   it("declares the hard floor and the advisory last-tested version", () => {
     expect(STELLAR_CLI_MIN_VERSION).toBe("23.0.0");
-    expect(STELLAR_CLI_LAST_TESTED_VERSION).toBe("27.0.0");
+    expect(STELLAR_CLI_LAST_TESTED_VERSION).toBe("28.0.0");
+  });
+
+  it("re-exports the canonical last-tested version from version.ts", () => {
+    expect(STELLAR_CLI_LAST_TESTED_VERSION).toBe(CANONICAL_LAST_TESTED_VERSION);
   });
 
   it("returns supported with no warnings for the last-tested version", () => {
-    const report = evaluateStellarCliCompatibility({ version: "27.0.0" });
+    const report = evaluateStellarCliCompatibility({ version: "28.0.0" });
 
     expect(report).toEqual({
-      version: "27.0.0",
+      version: "28.0.0",
       status: "supported",
       minVersion: "23.0.0",
-      lastTestedVersion: "27.0.0",
+      lastTestedVersion: "28.0.0",
       warnings: [],
     });
   });
@@ -33,19 +38,19 @@ describe("evaluateStellarCliCompatibility", () => {
   });
 
   it("returns untested with a warning for a version above the last-tested", () => {
-    const report = evaluateStellarCliCompatibility({ version: "28.0.0" });
+    const report = evaluateStellarCliCompatibility({ version: "29.0.0" });
 
     expect(report.status).toBe("untested");
     expect(report.warnings).toEqual([
       expect.objectContaining({
         code: "STELLAR_CLI_UNTESTED_VERSION",
-        message: expect.stringContaining("Stellar CLI 28.0.0 is newer than the last-tested 27.0.0"),
+        message: expect.stringContaining("Stellar CLI 29.0.0 is newer than the last-tested 28.0.0"),
       }),
     ]);
   });
 
   it("returns untested for the adjacent version above the last-tested", () => {
-    const report = evaluateStellarCliCompatibility({ version: "27.0.1" });
+    const report = evaluateStellarCliCompatibility({ version: "28.0.1" });
 
     expect(report.status).toBe("untested");
     expect(report.warnings[0]?.code).toBe("STELLAR_CLI_UNTESTED_VERSION");

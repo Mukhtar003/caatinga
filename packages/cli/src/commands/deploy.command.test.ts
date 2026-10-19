@@ -216,6 +216,28 @@ describe("deploy command", () => {
     }
   });
 
+  it("runs_wiring_on_full_deploy_when_only_postDeployRead_is_configured", async () => {
+    const configWithReadHooks: CaatingaConfig = {
+      ...config,
+      postDeployRead: [{ contract: "counter", method: "get", args: {}, kind: "read" }],
+    };
+    loadConfigMock.mockResolvedValue(configWithReadHooks);
+    runPostDeployHooksMock.mockResolvedValue([{ contract: "counter", method: "get" }]);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      await createDeployProgram().parseAsync(["node", "caatinga", "deploy", "--source", "alice"]);
+
+      expect(runPostDeployHooksMock).toHaveBeenCalledWith(
+        expect.objectContaining({ config: configWithReadHooks, source: "alice" })
+      );
+      const logOutput = logSpy.mock.calls.map((call) => call[0]).join("\n");
+      expect(logOutput).toContain("Wire complete");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("skips bindings when project has no frontend configured", async () => {
     const minimalConfig: CaatingaConfig = {
       project: "minimal-app",
@@ -282,6 +304,14 @@ describe("deploy command", () => {
     await mkdir(".artifacts/zk/main", { recursive: true });
     await writeDevCeremonyManifest(".artifacts/zk/main");
 
+    // Keep the protocol pre-flight off the real network: this test is about the
+    // dev-ceremony guardrail, and a live RPC round-trip would make it flaky.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(JSON.stringify({ result: { protocolVersion: 27 } }), { status: 200 })
+      );
+
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
@@ -294,6 +324,7 @@ describe("deploy command", () => {
         "mainnet",
         "--source",
         "alice",
+        "--yes",
       ]);
 
       expect(process.exitCode).toBe(1);
@@ -302,7 +333,11 @@ describe("deploy command", () => {
       expect(deployContractGraphMock).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
-      await rm(".artifacts/zk", { recursive: true, force: true });
+      fetchSpy.mockRestore();
+      // Scoped to this test's own circuit directory. Removing the whole
+      // `.artifacts/zk` tree races with the other CLI test files that use it
+      // while the suite runs in parallel, and surfaces as ENOTEMPTY.
+      await rm(".artifacts/zk/main", { recursive: true, force: true });
     }
   });
 });

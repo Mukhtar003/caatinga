@@ -4,6 +4,11 @@ This document is the authoritative tier list for Caatinga v1.0. **Breaking chang
 
 **Exception (3.9.0):** `ctg setup` was removed from the Tier 1 CLI surface while remaining on the `3.x` line. The break is documented in `@caatinga/cli` CHANGELOG 3.9.0; substitute with `ctg doctor` plus manual toolchain install. Future Tier 1 removals still target `4.0.0` unless similarly called out.
 
+**Exception (3.10.1):** `assertSorobanSymbol` was removed from `@caatinga/core/browser` (#154, #201)
+while remaining on the `3.x` line, and the release notes did not call it out. Caatinga still applies
+the same check internally to contract method names; in app code, validate `Symbol` inputs with the
+inline pattern shown in [Soroban types](./soroban-types.md#what-to-do-in-app-code).
+
 See also: [Architecture freeze](./architecture-freeze.md), [v1.0.0 Interface Contract](./internal/release/v1.0.0.md), [Errors](./errors.md).
 
 ---
@@ -21,13 +26,15 @@ Published binaries: `ctg` and `caatinga` (legacy alias; same entrypoint).
 | Domain                 | Commands                                                        |
 | ---------------------- | --------------------------------------------------------------- |
 | Scaffolding & Setup    | `init`, `identity`                                              |
-| Build                  | `build`                                                         |
+| Build                  | `build`, `generate`                                             |
 | Deployment & Lifecycle | `deploy`, `upgrade`, `rollback`, `wire`                         |
-| Query & Execution      | `read`, `invoke`, `estimate`, `dev`                             |
+| Query & Execution      | `read`, `invoke`, `estimate`                                    |
 | Status & Diagnostics   | `status`, `inspect`, `doctor`, `sync-env`, `migrate`, `version` |
 | Automation & CI        | `smoke`, `regression`, `ci`                                     |
 
 All commands, flags, exit codes (`0` / `1`), and `CAATINGA_*` error codes are documented in [cli.md](./cli.md) and [errors.md](./errors.md).
+
+`ctg dev` is registered as a hidden, reserved command and is not part of the supported surface.
 
 ZK commands (`ctg zk init`, `zk build`, `zk prove`, `zk invoke`) are **experimental** — see [scope.md](./scope.md).
 
@@ -41,6 +48,7 @@ Root exports:
 - `CaatingaContractClient`
 - `buildXdr`
 - `createWalletSession`, `WALLET_SESSION_STORAGE_KEY`
+- `DEFAULT_READ_SOURCE_ACCOUNT`
 
 Types: `CaatingaBindingAdapter`, `CaatingaClientConfig`, `CaatingaContractRegistration`, `CaatingaInvokeOptions`, `CaatingaInvokeResult`, `CaatingaInvokeStatus`, `CaatingaNetwork`, `CaatingaReadOptions`, `CaatingaReadResult`, `CaatingaWalletAdapter`, `CaatingaXdrBuildResult`, wallet session types.
 
@@ -55,7 +63,6 @@ Subpaths:
 
 - `CaatingaError`, `CaatingaErrorCode`, `toCaatingaError`, `formatCaatingaError`
 - Types: `CaatingaArtifacts`, `ContractArtifact`, `ContractMetadata`
-- `assertSorobanSymbol`
 
 ### Config (authoring)
 
@@ -94,9 +101,17 @@ Exported from `@caatinga/core` for power users and CI. **Additive changes are mi
 
 `invokeContract`, `readContract`, `estimateDeployCost`, `inspectContract`, `verifyExpect`, `runSmokeReads`
 
+### Runtime requirements (`@caatinga/core/runtime/requirements`)
+
+Dependency-free subpath for toolchain checks: `NODE_MIN_MAJOR`, `RUST_MIN_VERSION`, `RUST_BLOCKED_VERSIONS`, `CURRENT_RUST_WASM_TARGET`. Values move with supported toolchains (minor releases).
+
+### ZK helpers (`@caatinga/zk`)
+
+Published with root (`.`) and browser-safe (`@caatinga/zk/browser`) entrypoints. Like the `ctg zk` commands, this package is **experimental** — see [scope.md](./scope.md).
+
 ### Networks / config / templates
 
-- Networks: `resolveNetwork`, `WELL_KNOWN_NETWORKS`
+- Networks: `resolveNetwork`, `formatNetworkOrigin`, `WELL_KNOWN_NETWORKS` (types: `ResolvedNetwork`, `NetworkOrigin`)
 - Config load: `loadConfig`, `CaatingaConfigSchema`
 - Templates: `createProjectFromTemplate`, `TemplateManifestSchema`
 

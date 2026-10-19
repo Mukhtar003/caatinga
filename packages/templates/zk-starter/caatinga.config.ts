@@ -14,9 +14,20 @@ export default defineConfig({
       rpcUrl: "https://soroban-testnet.stellar.org",
       networkPassphrase: "Test SDF Network ; September 2015",
     },
+    mainnet: {
+      rpcUrl: "https://mainnet.sorobanrpc.com",
+      networkPassphrase: "Public Global Stellar Network ; September 2015",
+    },
   },
   frontend: {
     framework: "vite-react",
+    // Written on `ctg deploy` / `ctg sync-env`; read by src/network.ts.
+    envFile: ".env.local",
+    env: {
+      network: "VITE_CAATINGA_NETWORK",
+      rpcUrl: "VITE_CAATINGA_RPC_URL",
+      networkPassphrase: "VITE_CAATINGA_NETWORK_PASSPHRASE",
+    },
     bindingsOutput: "./src/bindings",
   },
   zk: {

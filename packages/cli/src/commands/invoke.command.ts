@@ -1,7 +1,8 @@
 import { Command } from "commander";
-import { invokeContract, loadConfig } from "@caatinga/core";
+import { formatNetworkOrigin, invokeContract, loadConfig, resolveNetwork } from "@caatinga/core";
 import { runCliAction } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { confirmMainnetOperation } from "../utils/mainnet-guardrails.js";
 
 export function registerInvokeCommand(program: Command): void {
   program
@@ -14,6 +15,11 @@ export function registerInvokeCommand(program: Command): void {
       "-s, --source <source>",
       "Stellar CLI identity alias that can sign (for example alice)"
     )
+    .option(
+      "--no-resolve-aliases",
+      "Pass string args literally; skip CLI identity alias resolution"
+    )
+    .option("-y, --yes", "Automatically confirm mainnet transactions without interactive prompt")
     .action(
       (
         target: string,
@@ -21,21 +27,37 @@ export function registerInvokeCommand(program: Command): void {
         options: {
           network?: string;
           source: string;
+          resolveAliases?: boolean;
+          yes?: boolean;
         }
       ) =>
         runCliAction(async () => {
           const config = await loadConfig();
+          const network = resolveNetwork(config, options.network);
+          const { name: networkName, config: networkConfig } = network;
+
+          logger.info(`Network: ${formatNetworkOrigin(network)}`);
+
+          await confirmMainnetOperation({
+            operation: "invoke",
+            networkName,
+            networkConfig,
+            target,
+            source: options.source,
+            yes: options.yes,
+          });
+
           const result = await invokeContract({
             config,
             target,
             args,
             networkName: options.network,
             source: options.source,
+            resolveAliases: options.resolveAliases,
           });
 
           logger.success("Invoke complete");
           logger.info("");
-          logger.info(`Network: ${result.network.name}`);
           logger.info(`Contract: ${result.target.contractName}`);
           logger.info(`Method: ${result.target.method}`);
 

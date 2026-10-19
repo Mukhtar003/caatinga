@@ -30,24 +30,34 @@ function secureArchivePath(dir: string): string {
 }
 
 async function tarDirectory(sourceDir: string, outputFile: string): Promise<void> {
-  await execa("tar", ["-czf", outputFile, "-C", sourceDir, "."], { stdio: "inherit" });
+  // stdout carries the base64 archive, so tar must not write to it.
+  await execa("tar", ["-czf", outputFile, "-C", sourceDir, "."], {
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "inherit",
+  });
 }
 
 async function assertNoPathTraversal(archiveFile: string, targetDir: string): Promise<void> {
-  const { stdout } = await execa("tar", ["-tzf", archiveFile]);
+  const { stdout } = await execa("tar", ["--full-time", "-tvzf", archiveFile]);
   const resolvedTarget = path.resolve(targetDir);
 
   for (const rawEntry of stdout.split("\n")) {
-    const entry = rawEntry.trim();
+    const line = rawEntry.trim();
+    const entry = line.replace(/^\S+\s+\S+\s+\d+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+/, "");
     if (!entry) {
       continue;
     }
 
+    const memberType = line[0];
+    if (memberType !== "-" && memberType !== "d") {
+      throw new Error(
+        `Refusing to import archive: entry "${entry}" is not a regular file or directory`
+      );
+    }
+
     const resolvedEntry = path.resolve(resolvedTarget, entry);
-    if (
-      resolvedEntry !== resolvedTarget &&
-      !resolvedEntry.startsWith(resolvedTarget + path.sep)
-    ) {
+    if (resolvedEntry !== resolvedTarget && !resolvedEntry.startsWith(resolvedTarget + path.sep)) {
       throw new Error(
         `Refusing to import archive: entry "${entry}" would extract outside ${resolvedTarget}`
       );
@@ -58,7 +68,23 @@ async function assertNoPathTraversal(archiveFile: string, targetDir: string): Pr
 async function untarDirectory(archiveFile: string, targetDir: string): Promise<void> {
   await mkdir(targetDir, { recursive: true, mode: 0o700 });
   await assertNoPathTraversal(archiveFile, targetDir);
-  await execa("tar", ["-xzf", archiveFile, "-C", targetDir], { stdio: "inherit" });
+  try {
+    await execa(
+      "tar",
+      [
+        "-xzf",
+        archiveFile,
+        "-C",
+        targetDir,
+        "--no-same-permissions",
+        "--no-same-owner",
+        "--no-overwrite-dir",
+      ],
+      { stdio: "inherit" }
+    );
+  } finally {
+    await execa("chmod", ["-R", "go-rwx", targetDir], { stdio: "inherit" });
+  }
 }
 
 export function registerIdentityCommand(program: Command): void {
@@ -78,8 +104,8 @@ export function registerIdentityCommand(program: Command): void {
           await tarDirectory(source, tmpArchive);
           const archive = await readFile(tmpArchive);
           process.stdout.write(archive.toString("base64"));
-          logger.info("");
-          logger.success(`Exported ${source} (${archive.length} bytes, base64 above)`);
+          // Status goes to stderr so `ctg identity export > id.b64` yields a clean archive.
+          logger.successToStderr(`Exported ${source} (${archive.length} bytes, base64 on stdout)`);
         });
       })
     );
