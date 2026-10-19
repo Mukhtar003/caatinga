@@ -5,6 +5,8 @@ import {
   loadConfig,
   parseExpectSpec,
   readContract,
+  resolveNetwork,
+  formatNetworkOrigin,
   summarizeReadOutput,
 } from "@caatinga/core";
 import { runCliAction } from "../utils/errors.js";
@@ -19,7 +21,7 @@ export function registerReadCommand(program: Command): void {
     .option("-n, --network <network>", "Configured network name")
     .option(
       "-s, --source <source>",
-      "Stellar CLI identity alias for simulation context (defaults to CAATINGA_SOURCE, otherwise alice)"
+      "Stellar CLI identity alias for simulation context (defaults to CAATINGA_SOURCE, otherwise alice; required on mainnet)"
     )
     .option(
       "--expect <expect>",
@@ -46,8 +48,13 @@ export function registerReadCommand(program: Command): void {
       ) =>
         runCliAction(async () => {
           const config = await loadConfig();
+          const network = resolveNetwork(config, options.network);
 
-          const resolvedSource = describeCliSource(options.source);
+          logger.info(`Network: ${formatNetworkOrigin(network)}`);
+
+          const resolvedSource = describeCliSource(options.source, {
+            network,
+          });
           if (resolvedSource.origin !== "explicit") {
             const originLabel =
               resolvedSource.origin === "env" ? "from CAATINGA_SOURCE" : "built-in default";
@@ -73,7 +80,6 @@ export function registerReadCommand(program: Command): void {
 
           logger.success("Read complete");
           logger.info("");
-          logger.info(`Network: ${result.network.name}`);
           logger.info(`Contract: ${result.target.contractName}`);
           logger.info(`Method: ${result.target.method}`);
 

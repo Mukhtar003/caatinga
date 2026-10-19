@@ -6,16 +6,16 @@ After `npm install -g @caatinga/cli` (or a local install), the package exposes t
 
 ## Supported today vs not yet
 
-| Capability                        | Status                                                       |
-| --------------------------------- | ------------------------------------------------------------ |
-| Official frontend templates       | Vite + React only (`vite-react`)                             |
-| `ctg upgrade`                     | In-place WASM upgrade (upload + invoke `upgrade`)            |
-| `ctg deploy --upgrade`            | Redeploy with new `contractId` + artifact history            |
-| `ctg zk build`                    | Single-party **dev** ceremony; blocked on mainnet by default |
-| `ctg zk invoke --embed-vk`        | **Not supported** (experimental / end-to-end incomplete)     |
-| Browser `invoke` via wallet       | **Single-invoker**; multi-auth is app-owned                  |
-| Multi-signer / `signAuthEntry`    | Application code; `CAATINGA_MULTI_AUTH_REQUIRED`             |
-| Production ZK (MPC powers-of-tau) | Out of scope; no Caatinga command for MPC ceremony           |
+| Capability                     | Status                                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Official frontend templates    | Vite + React only (`vite-react`)                                                                                   |
+| `ctg upgrade`                  | In-place WASM upgrade (upload + invoke `upgrade`)                                                                  |
+| `ctg deploy --upgrade`         | Redeploy with new `contractId` + artifact history                                                                  |
+| `ctg zk build`                 | **Dev** ceremony by default; import an audited one for mainnet (`ctg zk import-ceremony`)                          |
+| `ctg zk invoke --embed-vk`     | Supported — calls `verify_proof_embedded` (needs `zk build --embed-vk`)                                            |
+| Browser `invoke` via wallet    | **Single-invoker**; multi-auth is app-owned                                                                        |
+| Multi-signer / `signAuthEntry` | Application code; `CAATINGA_MULTI_AUTH_REQUIRED`                                                                   |
+| Production ZK (MPC ceremony)   | `ctg zk import-ceremony` **imports** an external ceremony's artifacts; running the ceremony itself is out of scope |
 
 See [Client — Single-invoker scope](./client.md#single-invoker-scope) and [ZK module](./zk.md#production-guardrails) for details.
 
@@ -92,7 +92,7 @@ plain `-v`/`--version` flag stays offline and prints only the version.
 
 ## `ctg deploy`
 
-Flags: `--source` (required), `--network`, `--force`, `--upgrade`, `--if-changed`, `--no-deps`, `--verify-deps`, `--no-stale-check`, `--no-generate`, `--no-wire`, `--no-sync-env`, `--allow-dev-ceremony`
+Flags: `--source` (required), `--network`, `-y, --yes`, `--force`, `--upgrade`, `--if-changed`, `--dry-run`, `--no-deps`, `--verify-deps`, `--no-stale-check`, `--no-generate`, `--no-wire`, `--no-sync-env`, `--allow-dev-ceremony`
 
 Deploys one contract (or the full configured graph when `contract` is omitted) and records contract IDs in `caatinga.artifacts.json`. Transient testnet failures retry with backoff before `CAATINGA_DEPLOY_FAILED`.
 
@@ -104,6 +104,8 @@ Behavior:
 - `--verify-deps` confirms each dependency's contract ID exists on-chain before resolving deploy args
 - Without `--force`, an existing `contractId` prints `[skipped]` and does not call Stellar CLI
 - Before deploy, Caatinga warns if sources look newer than the WASM (skip with `--no-stale-check`)
+- `--dry-run` estimates the deploy fee without submitting (same as `ctg estimate deploy`; uses the first configured contract when `contract` is omitted)
+- On mainnet, deploy asks for interactive confirmation; `-y, --yes` skips the prompt (for CI)
 
 After a successful deploy:
 
@@ -114,7 +116,7 @@ Use `deploy --upgrade` (alias for `--force` with upgrade history reason) when yo
 contract instance** and artifact history keyed by prior `contractId`. For admin-gated in-place WASM
 replacement on the **existing** `contractId`, use `ctg upgrade` instead.
 
-## `ctg upgrade <contract> --source <identity> [--network testnet] [--if-changed] [--expected-hash <hash>] [--no-build] [--generate] [--sync-env]`
+## `ctg upgrade <contract> --source <identity> [--network testnet] [-y] [--if-changed] [--expected-hash <hash>] [--no-build] [--generate] [--sync-env]`
 
 Upgrades a deployed contract **in-place**: build (unless `--no-build`), `stellar contract upload`,
 then `stellar contract invoke … upgrade --new_wasm_hash <hash>` on the artifact's current
@@ -131,7 +133,55 @@ fails, the CLI hints to use `ctg deploy --upgrade` for redeploy-style upgrades. 
 failures exit with `CAATINGA_UPLOAD_FAILED`; missing hash in CLI output uses
 `CAATINGA_WASM_HASH_NOT_FOUND`.
 
-## `ctg wire [--network testnet] --source <identity>`
+## `ctg estimate deploy <contract> --source <identity> [--network testnet]`
+
+Estimates the fee for deploying one contract without submitting anything. Caatinga builds the
+deploy transaction for `--source`, simulates it against the selected network, and prints the
+inclusion fee, resource fee, and total in stroops. The estimate is **advisory**: when simulation
+fails, the command prints the reason and exits without an estimate instead of failing.
+`ctg deploy --dry-run` runs the same estimate.
+
+## `ctg estimate verify <circuit> [--network testnet]`
+
+Estimates the on-chain CPU and memory needed to verify a proof for a ZK circuit, without
+submitting anything. Reads the public-signal count from the circuit's verification key and
+reports CPU instructions and memory against the reference network limits, warning when the
+budget is close to (or past) the limit.
+
+The estimate is fitted to testnet simulations of the Caatinga verifier (see
+[ZK cost reference](./zk.md#cost-reference)) and depends only on the public-signal count;
+the limits are the 400M-instruction / 40 MiB per-transaction caps shared by testnet and
+mainnet. Treat it as a pre-flight signal, not a fee quote — simulate the real call with
+`stellar contract invoke --send=no` for exact numbers.
+
+With `--network`, the ZK protocol pre-flight (protocol 27+) runs first: a network that cannot verify
+BLS12-381 fails with `CAATINGA_ZK_PROTOCOL_VERSION_UNSUPPORTED` before any budget is printed.
+
+## `ctg inspect <contract> [--network testnet]`
+
+Compares a deployed contract with its local artifact record. Prints the artifact's contract ID,
+WASM hash, deploy time, and history entry count; whether the contract interface is reachable on
+the network (with Stellar CLI diagnostics when it is not); whether the local WASM hash matches the
+artifact; and the configured dependencies. Requires Stellar CLI and an existing artifact for the
+contract on that network (otherwise `CAATINGA_ARTIFACT_NOT_FOUND`).
+
+## `ctg rollback <contract> --to <contractId> [--network testnet] [-y]`
+
+Logical rollback: restores a previous contract ID from the contract's `history[]` in
+`caatinga.artifacts.json` and makes it the active ID. **On-chain state is unchanged** — newer
+deployments stay on the network as orphaned contracts. Re-run `ctg generate` and `ctg sync-env`
+afterwards so bindings and the frontend env point at the restored ID.
+
+`--to` must be a `C...` contract ID (56 chars) or a 64-char hex ID that exists in the artifact
+history; otherwise the command fails with `CAATINGA_ROLLBACK_TARGET_NOT_FOUND`. On mainnet it asks
+for confirmation unless `-y` is passed.
+
+## `ctg migrate artifacts`
+
+Upgrades `caatinga.artifacts.json` to the current schema version in place (no-op when it is
+already current). See [Artifacts versioning](./artifacts-versioning.md).
+
+## `ctg wire [--network testnet] --source <identity> [-y]`
 
 Runs every `postDeploy` and `postDeployRead` hook from `caatinga.config.ts` in order. Each hook
 calls a deployed contract method with resolved placeholders (`${contracts.*.contractId}`,
@@ -191,7 +241,7 @@ Runs read-only smoke checks from `smoke.reads` or `postDeployRead` in config, us
 
 When `smoke.useFreshSymbol` is `true`, each read gets an ephemeral `symbol` arg for testnet writes that should not pollute shared state.
 
-## `ctg regression --source <identity> [--network testnet] [--skip-test] [--skip-build] [--skip-deploy] [--skip-generate] [--skip-smoke]`
+## `ctg regression --source <identity> [--network testnet] [-y] [--skip-test] [--skip-build] [--skip-deploy] [--skip-generate] [--skip-smoke]`
 
 Orchestrates the recommended pipeline: `pnpm test` → `ctg build` → `ctg deploy --if-changed` → `ctg generate` → `ctg smoke`.
 
@@ -203,8 +253,9 @@ restoring Stellar CLI identity secrets. `--strict` is forwarded to `doctor` only
 
 ## `ctg identity export [--path ~/.config/stellar]`
 
-Exports the Stellar CLI config directory as a base64 tarball on stdout (for
-`CAATINGA_CI_STELLAR_CONFIG_B64`). Prefer this over hand-rolled tar commands — see
+Exports the Stellar CLI config directory as a base64 tarball on stdout. Use it to move an identity
+to another machine with `ctg identity import`, or as `CAATINGA_CI_STELLAR_CONFIG_B64` for the CI
+restore script — see
 [Testing — Stellar CLI config blob](./internal/testing.md#stellar-cli-config-blob-format).
 
 ## `ctg identity import <archive-file> [--path ~/.config/stellar]`
@@ -215,13 +266,16 @@ would resolve outside the target directory (tar path traversal) — treat this t
 untrusted archive: only import files from a source you trust, since the check blocks path
 traversal but not a malicious archive's legitimate-looking contents.
 
-## `ctg invoke <contract.method> --source <identity> [--network testnet] [args...]`
+## `ctg invoke <contract.method> --source <identity> [--network testnet] [-y] [--no-resolve-aliases] [args...]`
 
-Invokes a deployed contract method that **mutates state** or must be signed and submitted. Extra args are forwarded to the Stellar implicit contract CLI. CLI identity aliases in named args (for example `--owner alice`) are resolved to `G...` addresses before invoke.
+Invokes a deployed contract method that **mutates state** or must be signed and submitted.
+Extra args are forwarded to the Stellar implicit contract CLI. CLI identity aliases in named args
+(for example `--owner alice`) are resolved to `G...` addresses before invoke (see `ctg read` below
+for escaping plain strings). On mainnet, invoke asks for confirmation unless `-y` is passed.
 
 If Stellar CLI reports that the target is a read-only method, Caatinga suggests `ctg read` (or `client.read()` / `client.simulate()` in browser code) instead of `force: true`.
 
-## `ctg read <contract.method> [--network testnet] [--source alice] [--expect <dsl>] [--quiet] [--summary] [args...]`
+## `ctg read <contract.method> [--network testnet] [--source alice] [--expect <dsl>] [--quiet] [--summary] [--no-resolve-aliases] [args...]`
 
 Simulates a read-only contract method with `stellar contract invoke --send=no`. `--source` is optional; Caatinga resolves `CAATINGA_SOURCE` or defaults to `alice` for the simulation account.
 
@@ -265,26 +319,45 @@ npx ctg read counter.get --network testnet --expect '{"matcher":"reachable"}'
 npx ctg read token.list --network testnet --expect '{"matcher":"isArray"}' --summary
 ```
 
-Full schema and config examples: [Config — postDeploy and smoke](./config.md#postdeploy-hooks-and-smoke).
+Full schema and config examples: [Config — postDeploy and smoke](./config.md#example-postdeploy-postdeployread-and-smoke).
 
 ## ZK commands
 
 Circom Groth16 workflow (`ctg zk init`, `build`, `prove`, `invoke`). Full reference:
 [ZK module](./zk.md).
 
-| Command                                       | Purpose                                                                  |
-| --------------------------------------------- | ------------------------------------------------------------------------ |
-| `ctg zk build [circuit] [--embed-vk]`         | Compile Circom and run **dev** trusted setup (`--embed-vk` experimental) |
-| `ctg zk prove [circuit]`                      | Generate `proof.json` and `public.json`                                  |
-| `ctg zk invoke [circuit] --source <identity>` | Call on-chain `verify_proof` (dynamic VK)                                |
-| `ctg zk invoke [circuit] --network <name>`    | Target a configured network (not only `defaultNetwork`)                  |
+| Command                                              | Purpose                                                                      |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `ctg zk init [project]`                              | Scaffold `zk-starter` (`--template`, `--minimal`, `--force`)                 |
+| `ctg zk build [circuit] [--embed-vk] [--network]`    | Compile Circom + trusted setup; `--embed-vk` also writes `vk.rs`             |
+| `ctg zk import-ceremony [circuit] --ceremony <path>` | Import an external ceremony's `circuit_final.zkey` + `verification_key.json` |
+| `ctg zk verify-ceremony [circuit]`                   | Re-check an imported ceremony offline (hashes, `zkey verify`, VK)            |
+| `ctg zk prove [circuit] [--debug]`                   | Generate `proof.json` and `public.json` (`--debug` emits `witness.wtns`)     |
+| `ctg zk invoke [circuit] --source <identity>`        | Call on-chain `verify_proof` (dynamic VK); `-y` skips mainnet prompt         |
+| `ctg zk invoke [circuit] --network <name>`           | Target a configured network (not only `defaultNetwork`)                      |
+| `ctg zk invoke [circuit] --embed-vk`                 | Call `verify_proof_embedded` using the baked-in VK                           |
 
 Shared ZK flags:
 
 - `--allow-dev-ceremony` — bypass mainnet guardrails for dev-ceremony artifacts (not for production)
-- `--embed-vk` on `zk build` — experimental; writes `vk.rs` only. **`zk invoke --embed-vk` is blocked** until the embedded-VK contract path is complete.
+- `--embed-vk` on `zk build` — generates `contracts/verifier/src/vk.rs`; rebuild and redeploy the verifier before invoking with `--embed-vk`
+- `--ceremony <path>` on `zk import-ceremony` — directory holding the ceremony output; `--source-url`, `--ceremony-name`, `--participants` and `--retrieved-at` record provenance
 
-When verification returns `false`, the CLI exits with `CAATINGA_ZK_VERIFICATION_FAILED`. Mainnet deploy/invoke with dev ceremony artifacts exits with `CAATINGA_ZK_DEV_CEREMONY_BLOCKED` unless `--allow-dev-ceremony` is set.
+`ctg estimate verify <circuit> [--network <name>]` reports the CPU/memory budget for verifying that circuit, and flags a network below protocol 27.
+
+When verification returns `false`, the CLI exits with `CAATINGA_ZK_VERIFICATION_FAILED`.
+
+Error codes the ZK commands surface:
+
+| Code                                        | Cause                                                                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `CAATINGA_ZK_DEV_CEREMONY_BLOCKED`          | Mainnet deploy/invoke with dev ceremony artifacts, unless an audited ceremony is imported or `--allow-dev-ceremony` is set |
+| `CAATINGA_ZK_PROTOCOL_VERSION_UNSUPPORTED`  | Network is below protocol 27, which the verifier wasm (`soroban-sdk` 27) requires                                          |
+| `CAATINGA_ZK_INPUT_CONTAINS_PUBLIC_SIGNALS` | `circuits/input.json` holds a signal the circuit does not accept as input                                                  |
+| `CAATINGA_ZK_EMBED_VK_UNSUPPORTED`          | `--embed-vk` invoke without a generated `vk.rs`                                                                            |
+| `CAATINGA_ZK_CEREMONY_INCOMPATIBLE`         | Imported ceremony artifacts do not match the circuit                                                                       |
+| `CAATINGA_ZK_CEREMONY_TAMPERED`             | Imported ceremony artifacts changed since import, or fail `ctg zk verify-ceremony`                                         |
+| `CAATINGA_ZK_VERIFICATION_FAILED`           | On-chain verifier returned `false`                                                                                         |
 
 ## Stellar CLI compatibility
 

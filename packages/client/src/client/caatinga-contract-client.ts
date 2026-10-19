@@ -1,6 +1,7 @@
 import { CaatingaError, CaatingaErrorCode } from "@caatinga/core/browser";
 import { resolveContractId } from "../artifacts/resolve-contract-id.js";
 import { createDefaultBindingAdapter } from "../bindings/default-binding-adapter.js";
+import { DEFAULT_READ_SOURCE_ACCOUNT } from "../constants.js";
 import { buildXdr as buildTransactionXdr } from "../xdr/build-xdr.js";
 import { withWalletTimeout } from "../wallet/with-wallet-timeout.js";
 import type {
@@ -18,6 +19,7 @@ import {
   splitInvokeArgsAndOptions,
   splitReadArgsAndOptions,
 } from "./invoke-args.js";
+import { assertReadSourceAccount, normalizeReadSourceAccount } from "./read-source.js";
 import { prepareReadTransaction, readSimulationResult } from "./transaction-simulate.js";
 import { normalizeSubmitResult, submitTransaction } from "./transaction-submit.js";
 import type { StellarSdkSignTransaction, SubmitTransactionLike } from "./transaction-types.js";
@@ -59,6 +61,7 @@ export class CaatingaContractClient {
     maybeOptions?: CaatingaInvokeOptions
   ): Promise<CaatingaInvokeResult<T>> {
     const { args, debugXdr, debugRaw } = splitInvokeArgsAndOptions(argsOrOptions, maybeOptions);
+    await this.assertWalletNetwork(method);
     const { contractId, transaction } = await this.createTransaction(method, args);
     const xdr = await buildTransactionXdr({
       contractName: this.contractName,
@@ -71,9 +74,17 @@ export class CaatingaContractClient {
 
     let signedXdr: string | undefined;
     const signTransaction: StellarSdkSignTransaction = async (xdr) => {
+      if (!this.config.wallet) {
+        throw new CaatingaError(
+          `Failed to sign XDR for "${this.contractName}.${method}".`,
+          CaatingaErrorCode.WALLET_NOT_CONNECTED,
+          "Connect a wallet and approve the transaction."
+        );
+      }
+
       try {
         signedXdr = await withWalletTimeout("signTransaction", this.config.walletTimeout, () =>
-          this.config.wallet.signTransaction({
+          this.config.wallet!.signTransaction({
             xdr,
             networkPassphrase: this.config.network.networkPassphrase,
           })
@@ -153,8 +164,11 @@ export class CaatingaContractClient {
     argsOrOptions?: Record<string, unknown> | CaatingaReadOptions,
     maybeOptions?: CaatingaReadOptions
   ): Promise<CaatingaReadResult<T>> {
-    const { args, debugRaw } = splitReadArgsAndOptions(argsOrOptions, maybeOptions);
-    const { contractId, transaction } = await this.createTransaction(method, args);
+    const { args, debugRaw, sourceAccount } = splitReadArgsAndOptions(argsOrOptions, maybeOptions);
+    const { contractId, transaction } = await this.createTransaction(method, args, {
+      readOnly: true,
+      sourceAccount,
+    });
     const raw = await prepareReadTransaction(
       transaction,
       this.contractName,
@@ -182,7 +196,45 @@ export class CaatingaContractClient {
     return result.result;
   }
 
-  private async createTransaction(method: string, args?: Record<string, unknown>) {
+  /**
+   * Fails before building or signing when the wallet reports a different network than
+   * the app, instead of a generic sign/submit failure later. Wallets that cannot report
+   * their network (adapter method missing, returns undefined, or throws) are not blocked.
+   */
+  private async assertWalletNetwork(method: string): Promise<void> {
+    const { wallet, network } = this.config;
+    if (!wallet || !wallet.getNetworkPassphrase) {
+      return;
+    }
+
+    let walletPassphrase: string | undefined;
+    try {
+      walletPassphrase = await withWalletTimeout(
+        "getNetworkPassphrase",
+        this.config.walletTimeout,
+        () => wallet.getNetworkPassphrase!()
+      );
+    } catch (error) {
+      if (error instanceof CaatingaError && error.code === CaatingaErrorCode.WALLET_TIMEOUT) {
+        throw error;
+      }
+      return;
+    }
+
+    if (walletPassphrase && walletPassphrase !== network.networkPassphrase) {
+      throw new CaatingaError(
+        `Wallet is on a different network than the app for "${this.contractName}.${method}".`,
+        CaatingaErrorCode.WALLET_NETWORK_MISMATCH,
+        `Switch the wallet to "${network.name}" (${network.networkPassphrase}); it is on "${walletPassphrase}".`
+      );
+    }
+  }
+
+  private async createTransaction(
+    method: string,
+    args?: Record<string, unknown>,
+    options: { readOnly?: boolean; sourceAccount?: string } = {}
+  ) {
     const contractId = resolveContractId({
       artifacts: this.config.artifacts,
       network: this.config.network.name,
@@ -190,10 +242,37 @@ export class CaatingaContractClient {
       explicitContractId: this.registration.contractId,
     });
 
+    const resolvedSource = options.readOnly
+      ? await this.resolveReadPublicKey(method, options.sourceAccount)
+      : await this.resolveWalletPublicKey();
+
+    const client = this.bindingAdapter.createClient({
+      contractId,
+      // The placeholder default is never sent to the RPC: omitting `publicKey` makes the
+      // binding client use the SDK's local `new Account(NULL_ACCOUNT, "0")` instead of a
+      // `Server.getAccount(<null account>)` lookup, which fails on unfunded networks.
+      publicKey: resolvedSource === DEFAULT_READ_SOURCE_ACCOUNT ? undefined : resolvedSource,
+      rpcUrl: this.config.network.rpcUrl,
+      networkPassphrase: this.config.network.networkPassphrase,
+    });
+    const transaction = await this.bindingAdapter.callMethod({ client, method, args });
+
+    return { contractId, transaction };
+  }
+
+  private async resolveWalletPublicKey(): Promise<string> {
+    if (!this.config.wallet) {
+      throw new CaatingaError(
+        `Wallet is not connected or the public key is unavailable for "${this.contractName}".`,
+        CaatingaErrorCode.WALLET_NOT_CONNECTED,
+        "Connect the wallet and grant account access, then retry."
+      );
+    }
+
     let publicKey: string;
     try {
       publicKey = await withWalletTimeout("getPublicKey", this.config.walletTimeout, () =>
-        this.config.wallet.getPublicKey()
+        this.config.wallet!.getPublicKey()
       );
     } catch (error) {
       if (error instanceof CaatingaError) {
@@ -207,14 +286,82 @@ export class CaatingaContractClient {
         error
       );
     }
-    const client = this.bindingAdapter.createClient({
-      contractId,
-      publicKey,
-      rpcUrl: this.config.network.rpcUrl,
-      networkPassphrase: this.config.network.networkPassphrase,
-    });
-    const transaction = await this.bindingAdapter.callMethod({ client, method, args });
 
-    return { contractId, transaction };
+    if (typeof publicKey !== "string" || publicKey.trim().length === 0) {
+      throw new CaatingaError(
+        `Wallet is not connected or the public key is unavailable for "${this.contractName}".`,
+        CaatingaErrorCode.WALLET_NOT_CONNECTED,
+        "Connect the wallet and grant account access, then retry."
+      );
+    }
+
+    return publicKey;
+  }
+
+  /**
+   * Source account for `simulate()` / `read()`, in precedence order:
+   * 1. `options.sourceAccount` from this call,
+   * 2. the connected wallet's public key,
+   * 3. `CaatingaClientConfig.readSourceAccount`,
+   * 4. `DEFAULT_READ_SOURCE_ACCOUNT`.
+   *
+   * The wallet wins over configured config because config is a fallback for visitors
+   * without a wallet; pass `options.sourceAccount` to deliberately read as another account.
+   */
+  private async resolveReadPublicKey(method: string, perCallSource?: string): Promise<string> {
+    const context = `${this.contractName}.${method}`;
+
+    const explicit = normalizeReadSourceAccount(perCallSource);
+    if (explicit !== undefined) {
+      return assertReadSourceAccount(explicit, `the sourceAccount option of "${context}"`);
+    }
+
+    const walletPublicKey = await this.tryWalletPublicKey();
+    if (walletPublicKey !== undefined) {
+      return walletPublicKey;
+    }
+
+    const configured = normalizeReadSourceAccount(this.config.readSourceAccount);
+    if (configured !== undefined) {
+      return assertReadSourceAccount(
+        configured,
+        `CaatingaClientConfig.readSourceAccount of "${context}"`
+      );
+    }
+
+    return DEFAULT_READ_SOURCE_ACCOUNT;
+  }
+
+  /**
+   * Wallet public key for read-only calls, or `undefined` when the wallet cannot provide
+   * one (not configured, disconnected, locked, or an empty address). Reads must keep
+   * working for visitors without a wallet, so adapter rejections fall back to the
+   * configured/default source, including `CAATINGA_WALLET_NOT_CONNECTED`, which adapters
+   * raise for "no account access".
+   *
+   * `CAATINGA_WALLET_TIMEOUT` and other Caatinga errors are rethrown instead of masked:
+   * they mean the adapter broke its "reject on dismissal" contract or hit a real failure,
+   * and quietly reading as the placeholder account would hide it.
+   */
+  private async tryWalletPublicKey(): Promise<string | undefined> {
+    const wallet = this.config.wallet;
+    if (!wallet) {
+      return undefined;
+    }
+
+    let publicKey: string;
+    try {
+      publicKey = await withWalletTimeout("getPublicKey", this.config.walletTimeout, () =>
+        wallet.getPublicKey()
+      );
+    } catch (error) {
+      if (error instanceof CaatingaError && error.code !== CaatingaErrorCode.WALLET_NOT_CONNECTED) {
+        throw error;
+      }
+
+      return undefined;
+    }
+
+    return typeof publicKey === "string" && publicKey.trim().length > 0 ? publicKey : undefined;
   }
 }

@@ -3,6 +3,7 @@
 ## Contents
 
 - [Default CI](#default-ci)
+- [Deploy regression (testnet)](#deploy-regression-testnet)
 - [Live testnet smoke (release gate)](#live-testnet-smoke-release-gate)
 - [Smoke script exit codes](#smoke-script-exit-codes)
 - [Smoke secrets handling](#smoke-secrets-handling)
@@ -15,13 +16,17 @@ Default CI does not require testnet access, Freighter, or private keys. Tests us
 
 ## Default CI
 
-The default GitHub Actions workflow runs typecheck, docs check, build, and tests. No testnet access required.
+The default GitHub Actions workflow (`.github/workflows/ci.yml`) runs, in the `ci` job: `pnpm lint`, `pnpm check:versions`,
+`pnpm typecheck`, `pnpm docs:check`, `pnpm check:template-imports`, `pnpm build`, and `pnpm test`, with Stellar CLI
+`28.0.0` installed. A separate `stellar-cli-matrix` job installs Stellar CLI `23.3.0` (minimum supported) and runs the
+parser fixture matrix and live capability probe tests. No testnet access required.
 
 ## Deploy regression (testnet)
 
 Workflow: `.github/workflows/testnet-deploy-regression.yml` — triggers: weekly schedule (Monday), `workflow_dispatch`.
 
-Typical steps: `ctg deploy --if-changed` → `ctg generate --strict-network` → `ctg doctor --strict-bindings` → `ctg smoke`.
+Steps (on a copy of the `react-vite-counter` template): `ctg build counter` → `ctg deploy counter --if-changed` →
+`ctg generate counter --strict-network` → `ctg doctor --strict-bindings`. The workflow does not run `ctg smoke`.
 
 Local equivalent:
 
@@ -55,13 +60,22 @@ Live testnet smoke uses `CAATINGA_CI_IDENTITY_ALIAS` and `CAATINGA_CI_STELLAR_CO
 
 ### Stellar CLI config blob format
 
-With Stellar CLI `27.0.0`, the safest secret format is a base64-encoded tar archive whose contents include `.config/stellar/config.toml` and `.config/soroban/identity/<alias>.toml`. The restore step still accepts the legacy plain `config.toml` payload, but that format can no longer recreate file-based identities by itself.
+The secret is a base64-encoded tar archive of the Stellar CLI config. `scripts/restore-stellar-ci-config.sh`
+accepts two layouts:
 
-To refresh `CAATINGA_CI_STELLAR_CONFIG_B64` for the current CLI layout:
+- the contents of the Stellar config directory (`identity/<alias>.toml`, `config.toml`, …), as
+  written by `ctg identity export` — restored into `~/.config/stellar/`;
+- a `.config/` tree (`.config/stellar/…`, plus legacy `.config/soroban/identity/…`) — restored into
+  `~/.config/`.
+
+It still accepts the legacy plain `config.toml` payload, but that format cannot recreate
+file-based identities by itself. Identity `*.toml` files are restored with mode `600`.
+
+To refresh `CAATINGA_CI_STELLAR_CONFIG_B64`:
 
 ```bash
 ctg identity export > stellar-ci-config.b64
-# or manually:
+# or, with a legacy ~/.config/soroban directory to carry over:
 mkdir -p ci-stellar-config/.config
 cp -R ~/.config/stellar ci-stellar-config/.config/stellar
 cp -R ~/.config/soroban ci-stellar-config/.config/soroban
@@ -69,11 +83,16 @@ tar -C ci-stellar-config -czf stellar-ci-config.tgz .config
 base64 -w0 stellar-ci-config.tgz
 ```
 
-Restore in CI with `ctg identity import stellar-ci-config.b64` after decoding is not needed — the import command reads the base64 text file directly.
+CI restores the secret with `bash scripts/restore-stellar-ci-config.sh` (`ctg identity import <file>`
+is the local equivalent for an exported file). Before 2026-10 the restore script accepted only the
+`.config/` layout, so `ctg identity export` output was rejected (#278).
 
 Before encoding, verify that `stellar keys public-key "$CAATINGA_CI_IDENTITY_ALIAS"` succeeds locally with the same files.
 
-Before tagging `v1.0.0`, verify three consecutive successful scheduled runs (see [v1.0.0 observability plan](./release/v1.0.0.md#observability-plan)).
+Before promoting a release to `latest`, confirm recent scheduled smoke runs are green (see the
+[v1.0.0 observability plan](./release/v1.0.0.md#observability-plan) for the original criteria).
+
+### Stellar CLI fixtures
 
 Stellar CLI fixtures live under:
 
@@ -87,16 +106,18 @@ New Stellar CLI version fixtures should include the CLI semver in the filename, 
 
 See [Stellar CLI Version Contract](../stellar-cli-version-contract.md) for the supported version range and upgrade process.
 
-When adding parser behavior:
+### Adding parser behavior
 
-CI runs `pnpm check:fixtures` (`scripts/check-fixture-references.sh`) to fail on orphaned files under `packages/core/test/fixtures/stellar-cli/`.
+`pnpm check:fixtures` (`scripts/check-fixture-references.sh`) fails on orphaned files under
+`packages/core/test/fixtures/stellar-cli/`. It is not a step in `ci.yml`; it runs as part of `pnpm ci:publish-matrix`
+and `pnpm pre:publish`, so run it locally when you add or remove fixtures.
 
 1. Add the raw CLI output fixture.
 2. Add a parser test that reads the fixture.
 3. Include at least one failure fixture.
 4. Assert the public `CAATINGA_*` error code.
 
-When adding `@caatinga/client` behavior:
+### Adding `@caatinga/client` behavior
 
 1. Use mocked generated bindings.
 2. Use mocked wallet adapters.

@@ -10,13 +10,16 @@ import {
   CaatingaErrorCode,
   loadConfig,
   resolveNetwork,
+  formatNetworkOrigin,
 } from "@caatinga/core";
 import { npxCli } from "../utils/cli-name.js";
 import { runCliAction } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { confirmMainnetOperation } from "../utils/mainnet-guardrails.js";
 import { resolveDeployedTargetDetails } from "../utils/mainnet-target-details.js";
+import { hasPostDeployHooks } from "../utils/post-deploy-hooks.js";
 import {
+  assertProtocolForZkVerifiers,
   assertZkVerifierDeployAllowed,
   resolveContractNamesForDeploy,
 } from "../utils/zk-guardrails.js";
@@ -79,10 +82,10 @@ export function registerDeployCommand(program: Command): void {
           }
 
           const config = await loadConfig();
-          const { name: networkName, config: networkConfig } = resolveNetwork(
-            config,
-            options.network
-          );
+          const network = resolveNetwork(config, options.network);
+          const { name: networkName, config: networkConfig } = network;
+
+          logger.info(`Network: ${formatNetworkOrigin(network)}`);
 
           if (!options.dryRun) {
             await confirmMainnetOperation({
@@ -129,10 +132,22 @@ export function registerDeployCommand(program: Command): void {
 
           const contractNames = resolveContractNamesForDeploy(config, contractName);
 
+          const protocolAdvisory = await assertProtocolForZkVerifiers({
+            config,
+            contractNames,
+            networkName,
+            networkConfig,
+            operation: `ctg deploy ${contractName ?? "contract"}`,
+          });
+          if (protocolAdvisory) {
+            logger.warn(protocolAdvisory);
+          }
+
           await assertZkVerifierDeployAllowed({
             config,
             contractNames,
             networkName,
+            networkConfig,
             allowDevCeremony: Boolean(options.allowDevCeremony),
           });
 
@@ -162,7 +177,6 @@ export function registerDeployCommand(program: Command): void {
 
           logger.success("Deploy complete");
           logger.info("");
-          logger.info(`Network: ${result.network.name}`);
           for (const skipped of result.skippedContracts) {
             logger.info(`[skipped] ${skipped.name} — already deployed on ${result.network.name}`);
             logger.info(`  Contract ID: ${skipped.contractId}`);
@@ -175,12 +189,7 @@ export function registerDeployCommand(program: Command): void {
 
           const isFullDeploy = !contractName;
 
-          if (
-            isFullDeploy &&
-            options.wire !== false &&
-            config.postDeploy &&
-            (config.postDeploy.length > 0 || (config.postDeployRead?.length ?? 0) > 0)
-          ) {
+          if (isFullDeploy && options.wire !== false && hasPostDeployHooks(config)) {
             try {
               const wireResults = await runPostDeployHooks({
                 config,
